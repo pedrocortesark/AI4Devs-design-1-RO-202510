@@ -1087,3 +1087,195 @@
 > Genera toda la FASE 6 lista para pegar en el documento final.
 > Incluye este prompt siguiendo las reglas en el archivo de prompts
 
+## Prompt #11
+
+**Título:** FASE 7 — Diagrama C4 en profundidad del Automation Engine (Motor de Automatizacion)
+
+**Contenido del prompt:**
+
+> Estamos en la FASE 7 — Diagrama C4 en profundidad del Automation Engine (Motor de Automatizacion)
+>
+> Actua como un arquitecto de software senior especializado en el modelo C4, sistemas SaaS B2B, arquitecturas basadas en eventos y motores de automatizacion no-code.
+>
+> El proyecto sigue siendo LTI, un ATS de nueva generacion con:
+> - Automatizacion no-code estilo Zapier/Make integrada en el propio ATS.
+> - IA operativa que asiste en screening, scoring, resúmenes y sugerencias de decision.
+> - Colaboracion recruiter–manager.
+> - Arquitectura de sistema ya definida en la FASE 6 (monolito modular + modulos internos para Core ATS, Automation Engine, IA, Notificaciones, etc.).
+>
+> Tu enfoque ahora debe ser **100% arquitectonico y orientado al motor de automatizacion (Automation Engine)**. No hables de UX, negocio o copy. Solo arquitectura.
+>
+> ---
+>
+> 🎯 Objetivo de esta fase
+>
+> Disenar y documentar la FASE 7 del documento maestro LTI-PCN como un **Diagrama C4 en profundidad centrado en el Automation Engine (Motor de Automatizacion)**, cubriendo tres niveles:
+>
+> 1. **Nivel 1 – System Context** (Contexto del sistema LTI y su Automation Engine).
+> 2. **Nivel 2 – Container** (Contenedores dentro de LTI que interactuan con el Automation Engine).
+> 3. **Nivel 3 – Component** (Componentes internos del Automation Engine).
+>
+> Usaremos **PlantUML** para los diagramas C4, pero en una version simplificada (sin includes externos), usando estereotipos de texto como `<<System>>`, `<<Container>>` y `<<Database>>`.
+>
+> ---
+>
+> 📌 Contexto a tener en cuenta (muy importante)
+>
+> 1. El **Automation Engine** ya fue definido conceptualmente en FASE 6 como:
+>    - Un subsistema dentro del backend monolito.
+>    - Encargado de gestionar reglas no-code (`AutomationRule`, `AutomationAction`, `AutomationEvent`).
+>    - Subscrito a eventos de dominio del Core ATS (`ApplicationStageChanged`, `JobPostingPublished`, `DecisionFinalized`, etc.).
+>    - Responsable de evaluar reglas y ejecutar acciones (emails, notificaciones, cambios de etapa, actualizacion de métricas).
+>
+> 2. El **modelo de datos** de FASE 5 ya tiene entidades relacionadas con automatizacion:
+>    - `AutomationRule`, `AutomationAction`, `AutomationEvent`.
+>    - Entidades del Core ATS: `Company`, `User`, `JobPosting`, `Application`, `PipelineStage`, `Decision`, `Notification`, `AuditLog`, etc.
+>
+> 3. La arquitectura del sistema (FASE 6) es:
+>    - Frontend React SPA
+>    - Backend monolito modular (Core ATS + Automation + IA + Notificaciones)
+>    - PostgreSQL + Prisma
+>    - S3 para ficheros
+>    - Auth externo (Auth0/Clerk/Cognito)
+>    - Eventos internos (en memoria o Redis) para el disparo de automatizaciones y notificaciones
+>
+> 4. Tu mision ahora es **centrarte exclusivamente en el Automation Engine** y su relacion con el resto de componentes, usando el modelo C4.
+>
+> ---
+>
+> 🧱 Nivel 1 – System Context (C4: System Context Diagram)
+>
+> Quiero que describas y dibujes el contexto del sistema LTI con foco en el Automation Engine.
+>
+> 1. Descripcion textual:
+>    - Explica brevemente LTI como sistema global.
+>    - Explica el rol del Automation Engine dentro de LTI.
+>    - Describe los actores clave que interactuan con el sistema:
+>      - Recruiter
+>      - Hiring Manager
+>      - Servicios externos (Email Provider, Slack/Teams, Proveedores de IA)
+>    - Explica como el Automation Engine encaja en el ecosistema: recibe eventos de LTI, aplica reglas, dispara acciones hacia otros sistemas.
+>
+> 2. Diagrama C4 de System Context en PlantUML:
+>    - Usa un diagrama `@startuml` / `@enduml` con elementos de tipo `rectangle` para representar sistemas y personas.
+>    - Usa estereotipos de texto entre `<< >>` para anotar el tipo (ej.: `<<Person>>`, `<<System>>`, `<<External System>>`).
+>    - Incluye al menos:
+>      - Recruiter (Person)
+>      - Hiring Manager (Person)
+>      - LTI ATS (System) — dentro del cual existe el Automation Engine como parte clave
+>      - Email Provider (External System)
+>      - Slack/Teams (External System)
+>      - AI Provider (External System) – aunque el foco no sea IA, el Automation Engine puede desencadenar acciones que terminan usando IA indirectamente.
+>    - Muestra relaciones como flechas con etiquetas cortas (ej.: "envia eventos", "ejecuta reglas", "envia notificaciones").
+>
+> ---
+>
+> 🧱 Nivel 2 – Container View (C4: Container Diagram)
+>
+> En este nivel nos centramos en los **contenedores lógicos** que forman LTI y su interaccion con el Automation Engine.
+>
+> 1. Descripcion textual:
+>    - Define los contenedores principales dentro del sistema LTI:
+>      - Frontend LTI (SPA)
+>      - Backend Core ATS (API + dominio ATS)
+>      - Automation Engine (contenedor dentro del backend o contenedor separado logico)
+>      - AI Service (contenedor logico, aunque ya definido en FASE 6)
+>      - Notification Service (contenedor logico para enviar emails, notificaciones internas, Slack/Teams)
+>      - Database (PostgreSQL)
+>      - Event Bus interno (en memoria o Redis)
+>    - Explica:
+>      - Como el Frontend interactua con el Backend Core ATS.
+>      - Como el Backend Core ATS emite eventos hacia el Event Bus interno.
+>      - Como el Automation Engine escucha eventos del Event Bus, consulta reglas en la DB, evalua y ejecuta acciones.
+>      - Como el Automation Engine coopera con el Notification Service y, opcionalmente, con el AI Service.
+>
+> 2. Diagrama C4 de Container en PlantUML:
+>    - Usaremos `rectangle` para representar contenedores, con estereotipos como `<<Container>>` y `<<Database>>`.
+>    - Debe incluir, al menos:
+>      - Frontend LTI (Browser / SPA)
+>      - Backend Core ATS (API + dominio)
+>      - Automation Engine (Motor de Automatizacion)
+>      - AI Service (Servicio IA)
+>      - Notification Service (Notificaciones)
+>      - PostgreSQL (Base de Datos)
+>      - Event Bus interno (por ejemplo, "Domain Events Bus")
+>      - Servicios externos: Email Provider, Slack/Teams, AI Provider
+>    - Muestra:
+>      - Frontend → Backend Core ATS (HTTP/JSON, WebSocket/SSE)
+>      - Backend Core ATS → Domain Events Bus (publica eventos)
+>      - Automation Engine → Domain Events Bus (suscrito a eventos)
+>      - Automation Engine → PostgreSQL (lee/escribe reglas y eventos de automatizacion)
+>      - Automation Engine → Notification Service (solicita envio de notificaciones y emails)
+>      - Notification Service → Email Provider / Slack/Teams
+>      - AI Service → AI Provider
+>
+> ---
+>
+> 🧱 Nivel 3 – Component View del Automation Engine (C4: Component Diagram)
+>
+> Aqui debes **abrir la caja** del Automation Engine y mostrar sus componentes internos.
+>
+> 1. Descripcion textual de componentes internos del Automation Engine:
+>    - Define los componentes logicos internos, por ejemplo:
+>      - **Event Listener / Trigger Processor**: suscrito al Domain Events Bus, recibe eventos (`ApplicationStageChanged`, `JobPostingPublished`, `DecisionFinalized`, etc.).
+>      - **Rule Repository**: componente que accede a la DB para leer `AutomationRule` y `AutomationAction` relevantes para el evento.
+>      - **Rule Evaluator**: motor que evalua condiciones de reglas en base al evento y contexto (empresa, oferta, candidatura, etc.).
+>      - **Action Builder**: prepara las acciones concretas que deben ejecutarse (enviar email, notificar, cambiar etapa, registrar metricas, llamar a IA, etc.).
+>      - **Action Executor**: ejecuta las acciones invocando adaptadores externos (Notification Service, Core ATS API, AI Service) y registra `AutomationEvent`.
+>      - **Logging & Monitoring / Audit**: registra logs de ejecucion, errores, metricas y, opcionalmente, entradas en `AuditLog`.
+>    - Explica brevemente como cooperan entre si para procesar un evento de dominio extremo a extremo.
+>
+> 2. Diagrama C4 de Component en PlantUML (centrado en el Automation Engine):
+>    - Usa `rectangle` para cada componente interno del Automation Engine con estereotipo `<<Component>>`.
+>    - Encapsula todos los componentes dentro de un `rectangle` mayor que represente `Automation Engine <<Container>>`.
+>    - Incluye conexiones hacia:
+>      - Domain Events Bus (entrada principal de eventos)
+>      - PostgreSQL (para leer reglas y escribir eventos de automatizacion)
+>      - Notification Service
+>      - Core ATS (para posibles cambios de estado adicionales)
+>      - AI Service (si alguna regla define acciones que usen IA)
+>    - Muestra el flujo tipico:
+>      - Domain Events Bus → Event Listener → Rule Repository → Rule Evaluator → Action Builder → Action Executor → (Notification Service / Core ATS / AI Service / DB / AuditLog)
+>
+> ---
+>
+> 📐 Requisitos de formato y estilo
+>
+> - Genera la FASE 7 completa en el documento LTI-PCN con esta estructura:
+>   - `## FASE 7 — Diagrama C4 del Automation Engine`
+>   - `### 7.1 System Context`
+>   - `### 7.2 Container View`
+>   - `### 7.3 Component View (Automation Engine)`
+>
+> - En cada subseccion, incluye primero una **descripcion textual clara** y luego el **diagrama PlantUML** correspondiente en un bloque de codigo:
+>
+>   ```
+>   ```plantuml
+>   @startuml
+>   ...
+>   @enduml
+>   ```
+>   ```
+>
+> - Para los diagramas PlantUML:
+>   - No uses includes externos ni librerias C4 prehechas.
+>   - Usa **solo sintaxis basica de PlantUML** (`rectangle`, `()`, conectores `-->`, etc.).
+>   - Usa estereotipos como texto dentro de `<< >>` para indicar el tipo de elemento.
+>   - Usa nombres coherentes con lo ya definido en FASE 5 y 6 (por ejemplo, "Frontend LTI", "Backend Core ATS", "Automation Engine", "AI Service", "Notification Service", "PostgreSQL DB", "Domain Events Bus").
+>
+> - No cambies ni reescribas las fases anteriores (FASE 1 a FASE 6). Solo agrega/modifica la FASE 7.
+>
+> - No inventes conceptos totalmente nuevos que contradigan lo ya establecido; puedes refinar o detallar, pero siempre dentro del marco ya definido.
+>
+> ---
+>
+> 🏁 Instruccion final
+>
+> Con toda la informacion anterior:
+>
+> 1. **Añade el contenido completo de la FASE 7 al documento LTI-PCN.md**, respetando la estructura indicada.
+> 2. **Genera los tres diagramas C4 en PlantUML** (System Context, Container, Component) centrados en el Automation Engine.
+> 3. **Mantén coherencia total** con el modelo de datos de la FASE 5 y la arquitectura de la FASE 6.
+> 4. Incluye este prompt completo en el log de prompts (nuevo numero secuencial) siguiendo el mismo formato que los anteriores.
+
+

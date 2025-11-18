@@ -1721,6 +1721,211 @@ La arquitectura descrita es coherente con el modelo de datos de la FASE 5 y con 
 
 ---
 
-## FASE 7 — Diagrama C4
+## FASE 7 — Diagrama C4 del Automation Engine
 
-> Pendiente de desarrollar. No modificar hasta que el prompt indique explícitamente que trabajamos en FASE 7.
+### 7.1 System Context
+
+El sistema LTI es una plataforma ATS SaaS B2B que combina gestión de ofertas, candidatos y pipelines con un **motor de automatización no-code** y una **capa de IA operativa**. Dentro de este sistema, el **Automation Engine** actúa como el “sistema nervioso” que escucha eventos del dominio ATS (publicación de ofertas, cambios de etapa, decisiones finales) y ejecuta acciones configuradas por negocio (emails, notificaciones, cambios de estado, actualización de métricas, invocación de servicios externos).
+
+En el contexto global del sistema:
+
+- **Recruiters** y **Hiring Managers** utilizan el **Frontend LTI** para trabajar con ofertas, candidatos y pipelines.
+- Sus acciones en el Frontend se traducen en operaciones sobre el **Backend Core ATS**, que persiste información en **PostgreSQL** y emite **eventos de dominio** cuando ocurren cambios relevantes.
+- El **Automation Engine** se sitúa dentro del backend LTI, suscrito a esos eventos de dominio. Cada evento se contrasta con las reglas configuradas (`AutomationRule`, `AutomationAction`), y si alguna aplica, el motor ejecuta las acciones correspondientes.
+- Algunas acciones se materializan en sistemas externos (envío de emails, mensajes a Slack/Teams) a través del **Notification Service** y proveedores externos. Otras generan registros de auditoría, actualizaciones adicionales de estado o disparan procesos que pueden implicar al **AI Service**.
+
+En resumen, el Automation Engine no es un sistema aislado, sino un componente clave dentro de LTI que conecta el **dominio ATS** con **acciones automatizadas** hacia el resto del ecosistema.
+
+```mermaid
+flowchart LR
+    Recruiter[Recruiter]
+    HM[Hiring Manager]
+
+    subgraph LTI_ATS[LTI ATS]
+        Frontend[Frontend LTI]
+        CoreATS[Backend Core ATS]
+        AutoEng[Automation Engine]
+    end
+
+    Email[Email Provider]
+    Slack[Slack or Teams]
+    AIProv[AI Provider]
+
+    Recruiter -->|usa para gestionar| Frontend
+    HM -->|usa para revisar y decidir| Frontend
+
+    Frontend -->|HTTP o WebSocket| CoreATS
+    CoreATS -->|eventos de dominio| AutoEng
+    AutoEng -->|cambios de estado| CoreATS
+
+    AutoEng -->|envio de emails| Email
+    AutoEng -->|envio de mensajes| Slack
+    AutoEng -->|acciones con IA| AIProv
+```
+
+### 7.2 Container View
+
+A nivel de contenedores, LTI se compone de varios bloques lógicos que cooperan para soportar el motor de automatización:
+
+- **Frontend LTI (SPA)** `<<Container>>`
+  - Aplicación React/TypeScript utilizada por recruiters y hiring managers.
+  - Se comunica con el Backend Core ATS vía HTTP/JSON y, para actualizaciones en tiempo casi real, mediante WebSocket/SSE.
+
+- **Backend Core ATS** `<<Container>>`
+  - Contenedor principal del dominio ATS (ofertas, candidatos, pipeline, feedback, decisiones).
+  - Expone APIs (REST/GraphQL) utilizadas por el Frontend.
+  - Publica **eventos de dominio** en un **Domain Events Bus** interno cuando se producen cambios relevantes (p.ej., `JobPostingPublished`, `ApplicationStageChanged`, `DecisionFinalized`).
+
+- **Automation Engine** `<<Container>>`
+  - Contenedor lógico responsable de recibir eventos desde el Domain Events Bus, consultar reglas en la base de datos, evaluarlas y ejecutar las acciones configuradas.
+  - Registra resultados de ejecución como `AutomationEvent` en la base de datos.
+
+- **AI Service** `<<Container>>`
+  - Servicio lógico que orquesta llamadas a proveedores de IA externos.
+  - Puede ser invocado por el Core ATS o por acciones del Automation Engine cuando una regla así lo especifique.
+
+- **Notification Service** `<<Container>>`
+  - Contenedor que encapsula el envío de emails, notificaciones internas y mensajes a Slack/Teams.
+  - Consume peticiones del Automation Engine (o de otros módulos) para materializar acciones de comunicación.
+
+- **PostgreSQL DB** `<<Database>>`
+  - Base de datos relacional central que almacena entidades del Core ATS y del módulo de automatización (`AutomationRule`, `AutomationAction`, `AutomationEvent`, `Notification`, etc.).
+
+- **Domain Events Bus** `<<Container>>`
+  - Medio interno (en memoria o Redis) mediante el cual el Core ATS publica eventos de dominio que el Automation Engine consume.
+
+- **Sistemas externos** `<<External System>>`
+  - **Email Provider**, **Slack/Teams**, **AI Provider** a los que se conecta el Notification Service o el AI Service.
+
+```mermaid
+flowchart LR
+    Frontend[Frontend LTI SPA]
+    CoreATS[Backend Core ATS]
+    AutoEng[Automation Engine]
+    AIService[AI Service]
+    NotifSvc[Notification Service]
+    EventsBus[Domain Events Bus]
+    DB[(PostgreSQL DB)]
+    Email[Email Provider]
+    Slack[Slack or Teams]
+    AIProv[AI Provider]
+
+    Frontend -->|HTTP JSON| CoreATS
+    Frontend -->|WebSocket SSE| CoreATS
+
+    CoreATS -->|CRUD dominio ATS| DB
+    CoreATS -->|publica eventos| EventsBus
+
+    EventsBus -->|eventos de dominio| AutoEng
+
+    AutoEng -->|lee reglas| DB
+    AutoEng -->|escribe AutomationEvent| DB
+    AutoEng -->|solicita envio| NotifSvc
+    AutoEng -->|invoca IA segun reglas| AIService
+    AutoEng -->|solicita cambios de estado| CoreATS
+
+    NotifSvc -->|envios de email| Email
+    NotifSvc -->|mensajes| Slack
+
+    AIService -->|llamadas IA| AIProv
+```
+
+### 7.3 Component View (Automation Engine)
+
+En el nivel de componentes, abrimos el contenedor **Automation Engine** para detallar su estructura interna. El objetivo es mostrar cómo se procesan los eventos de dominio extremo a extremo:
+
+1. **Event Listener / Trigger Processor** `<<Component>>`
+   - Se suscribe al **Domain Events Bus**.
+   - Recibe eventos de dominio como `ApplicationStageChanged`, `JobPostingPublished`, `DecisionFinalized`, etc.
+   - Normaliza los eventos de entrada y los encola para su procesamiento.
+
+2. **Rule Repository** `<<Component>>`
+   - Accede a la base de datos (`AutomationRule`, `AutomationAction`) para obtener las reglas activas relevantes para el evento recibido.
+   - Puede filtrar por `Company`, `JobPosting`, tipo de disparador, etc.
+
+3. **Rule Evaluator** `<<Component>>`
+   - Recibe el evento y el conjunto de reglas aplicables.
+   - Evalúa condiciones de cada regla (filtros, etapas origen/destino, tipos de decisión, etc.).
+   - Determina qué reglas se activan efectivamente y genera un conjunto de “intenciones de acción”.
+
+4. **Action Builder** `<<Component>>`
+   - A partir de las reglas activadas, construye acciones concretas listas para ejecutar (por ejemplo: enviar email con plantilla X, notificar a usuario Y, mover candidatura a etapa Z, registrar métrica).
+   - Enriquece las acciones con datos del dominio consultando, si es necesario, al Core ATS o a la base de datos.
+
+5. **Action Executor** `<<Component>>`
+   - Ejecuta las acciones concretas:
+     - llama al **Notification Service** para emails y mensajes.
+     - interactúa con el **Core ATS** para cambios de estado adicionales.
+     - invoca al **AI Service** si alguna acción lo requiere.
+   - Registra resultados de ejecución en `AutomationEvent` (incluyendo estado: SUCCESS/FAILED y mensajes de error en su caso).
+
+6. **Logging & Monitoring / Audit** `<<Component>>`
+   - Registra logs técnicos de la ejecución del motor.
+   - Puede registrar entradas adicionales en `AuditLog` para trazabilidad funcional.
+   - Expone métricas internas (latencia, tasa de errores, número de reglas ejecutadas) hacia la plataforma de observabilidad.
+
+    ```mermaid
+    flowchart LR
+        subgraph AutomationEngine
+            EventListener[EventListener]
+            RuleRepo[RuleRepository]
+            RuleEval[RuleEvaluator]
+            ActionBuilder[ActionBuilder]
+            ActionExec[ActionExecutor]
+            Logging[LoggingAndAudit]
+        end
+
+        EventsBus[Domain Events Bus]
+        DB[(PostgreSQL DB)]
+        NotifSvc[Notification Service]
+        CoreATS[Backend Core ATS]
+        AIService[AI Service]
+
+        EventsBus -->|envia eventos| EventListener
+
+        EventListener -->|buscar reglas| RuleRepo
+        RuleRepo -->|leer reglas| DB
+        RuleRepo -->|reglas candidatas| RuleEval
+
+        EventListener -->|evento normalizado| RuleEval
+        RuleEval -->|reglas activadas| ActionBuilder
+        ActionBuilder -->|acciones construidas| ActionExec
+
+        ActionExec -->|enviar notificaciones| NotifSvc
+        ActionExec -->|cambios de estado| CoreATS
+        ActionExec -->|invocar IA| AIService
+        ActionExec -->|registrar AutomationEvent| DB
+
+        EventListener -->|logs| Logging
+        RuleEval -->|logs| Logging
+        ActionExec -->|logs| Logging
+        Logging -->|guardar logs| DB
+    ```
+
+## 🏁 Conclusión — De arquitectura a ventaja competitiva
+
+El trabajo desarrollado en este documento define más que un sistema: **define una estrategia de producto**.  
+LTI nace en un mercado saturado de ATS tradicionales, pero la combinación de:
+
+- un **motor de automatización no-code**,  
+- una **capa de IA operativa**,  
+- un **dominio ATS robusto y coherente**,  
+- y una **arquitectura escalable, modular y preparada para crecer**,  
+
+posiciona la plataforma como un competidor que no busca seguir el estándar, sino **redefinirlo**.
+
+El **Automation Engine** se convierte en el eje diferenciador capaz de transformar procesos complejos en automatizaciones accesibles, comprensibles y configurables sin intervención técnica. La arquitectura presentada no solo permite construir un MVP sólido, sino que abre el camino hacia:
+
+- automatizaciones más inteligentes,  
+- recomendaciones generadas por IA,  
+- flujos de trabajo autoajustables,  
+- colaboraciones más rápidas y transparentes,  
+- y un ecosistema conectado con herramientas reales del día a día (Slack, Teams, email, plataformas de IA).
+
+Todo ello con un sustento técnico claro, con vistas C4, modelos de datos, casos de uso y componentes descritos con precisión.
+
+Este documento marca **el punto de partida** de LTI.  
+A partir de aquí, el reto no es conceptual: es de ejecución.
+
+> *Cuando el reclutamiento deja de ser un proceso manual y se convierte en un sistema inteligente, las empresas no solo contratan más rápido: contratan mejor.*  
+> LTI aspira a ser ese sistema inteligente.
